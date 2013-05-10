@@ -40,10 +40,11 @@ object Parser {
   type ParserContext = Context { type PrefixType = Parser }
 
   def ruleImpl(c: ParserContext)(r: c.Expr[Rule]): c.Expr[Boolean] = {
-    val opTreeContext = new OpTreeContext(c)
-    import opTreeContext._
-
-    val OpTree(opTree) = r.tree
-    opTree.render
+    val opTree = OpTree(c)(r.tree)
+    opTree.render(c)
   }
+
+  class GrammarException(_msg: String) extends RuntimeException(_msg)
+
+  def fail(errorMsg: String) = throw new GrammarException(errorMsg)
 }
