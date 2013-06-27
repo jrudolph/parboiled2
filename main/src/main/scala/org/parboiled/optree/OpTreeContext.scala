@@ -6,6 +6,19 @@ trait OpTreeContext[OpTreeCtx <: Parser.ParserContext] {
   val c: OpTreeCtx
   import c.universe._
 
+  object Defs {
+    val parserClass = c.mirror.staticClass("org.parboiled.Parser")
+    val parserTpe = parserClass.typeSignature
+
+    val ruleClass = c.mirror.staticClass("org.parboiled.Rule")
+    val ruleTpe = ruleClass.typeSignature
+
+    val optional = parserTpe.declaration(newTermName("optional"))
+
+    val || = ruleTpe.declaration(newTermName("||").encodedName)
+    val ~ = ruleTpe.declaration(newTermName("~").encodedName)
+  }
+
   type FromTree[T <: OpTree] = PartialFunction[Tree, T]
 
   object Decoded {
@@ -26,6 +39,17 @@ trait OpTreeContext[OpTreeCtx <: Parser.ParserContext] {
     val fromTree: FromTree[OpTree]
     def isDefinedAt(tree: Tree) = fromTree.isDefinedAt(tree)
     def apply(tree: Tree) = fromTree.apply(tree)
+  }
+
+  abstract class UnaryCompanion[T <: OpTree](targetSymbol: Symbol, cons: OpTree ⇒ T) extends OpTreeCompanion {
+    val fromTree: FromTree[T] = {
+      case Apply(s @ Select(This(_), _), List(arg)) if s.symbol == targetSymbol ⇒ cons(OpTree(arg))
+    }
+  }
+  abstract class BinaryCompanion[T <: OpTree](targetSymbol: Symbol, cons: (OpTree, OpTree) ⇒ T) extends OpTreeCompanion {
+    val fromTree: FromTree[T] = {
+      case Apply(s @ Select(lhs, _), List(rhs)) if s.symbol == targetSymbol ⇒ cons(OpTree(lhs), OpTree(rhs))
+    }
   }
 
   object OpTree extends OpTreeCompanion {
@@ -97,11 +121,7 @@ trait OpTreeContext[OpTreeCtx <: Parser.ParserContext] {
 
   class Optional(op: OpTree) extends FirstOf(op, EmptyString)
 
-  object Optional extends OpTreeCompanion {
-    val fromTree: FromTree[Optional] = {
-      case Apply(Select(This(_), Decoded("optional")), List(arg)) ⇒ new Optional(OpTree(arg))
-    }
-  }
+  object Optional extends UnaryCompanion(Defs.optional, new Optional(_))
 
   case class ZeroOrMore(op: OpTree) extends OpTree {
     def render(): Expr[Rule] = reify {
@@ -164,15 +184,7 @@ trait OpTreeContext[OpTreeCtx <: Parser.ParserContext] {
     }
   }
 
-  object Sequence extends OpTreeCompanion {
-    val fromTree: FromTree[Sequence] = {
-      case Apply(Select(a, Decoded("~")), List(arg)) ⇒ {
-        val lhs = OpTree(a)
-        val rhs = OpTree(arg)
-        Sequence(lhs, rhs)
-      }
-    }
-  }
+  object Sequence extends BinaryCompanion(Defs.~, new Sequence(_, _))
 
   case class FirstOf(lhs: OpTree, rhs: OpTree) extends OpTree {
     def render(): Expr[Rule] = reify {
@@ -183,13 +195,5 @@ trait OpTreeContext[OpTreeCtx <: Parser.ParserContext] {
     }
   }
 
-  object FirstOf extends OpTreeCompanion {
-    val fromTree: FromTree[FirstOf] = {
-      case Apply(Select(a, Decoded("||")), List(arg)) ⇒ {
-        val lhs = OpTree(a)
-        val rhs = OpTree(arg)
-        FirstOf(lhs, rhs)
-      }
-    }
-  }
+  object FirstOf extends BinaryCompanion(Defs.||, new FirstOf(_, _))
 }
