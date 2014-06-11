@@ -48,6 +48,8 @@ trait OpTreeContext[OpTreeCtx <: ParserMacros.ParserContext] {
 
     // renders a Boolean Tree
     protected def renderInner(wrapped: Boolean): Tree
+
+    protected val recName: TermName = s"rec_${getClass.getSimpleName}_${c.enclosingMethod.symbol.name.decoded}"
   }
 
   def collector(lifterTree: Tree): Collector =
@@ -292,19 +294,19 @@ trait OpTreeContext[OpTreeCtx <: ParserMacros.ParserContext] {
     def ruleFrame = reify(RuleFrame.ZeroOrMore).tree
     def renderInner(wrapped: Boolean): Tree = {
       val recurse =
-        if (separator eq null) q"rec(__saveState)"
-        else q"val m = __saveState; if (${separator(wrapped)}) rec(m) else m"
+        if (separator eq null) q"$recName(__saveState)"
+        else q"val m = __saveState; if (${separator(wrapped)}) $recName(m) else m"
 
       q"""
       ${collector.valBuilder}
 
-      @_root_.scala.annotation.tailrec def rec(mark: org.parboiled2.Parser.Mark): org.parboiled2.Parser.Mark =
+      @_root_.scala.annotation.tailrec def $recName(mark: org.parboiled2.Parser.Mark): org.parboiled2.Parser.Mark =
         if (${op.render(wrapped)}) {
           ${collector.popToBuilder}
           $recurse
         } else mark
 
-      __restoreState(rec(__saveState))
+      __restoreState($recName(__saveState))
       ${collector.pushBuilderResult}"""
     }
   }
@@ -313,20 +315,20 @@ trait OpTreeContext[OpTreeCtx <: ParserMacros.ParserContext] {
     def ruleFrame = reify(RuleFrame.OneOrMore).tree
     def renderInner(wrapped: Boolean): Tree = {
       val recurse =
-        if (separator eq null) q"rec(__saveState)"
-        else q"val m = __saveState; if (${separator(wrapped)}) rec(m) else m"
+        if (separator eq null) q"$recName(__saveState)"
+        else q"val m = __saveState; if (${separator(wrapped)}) $recName(m) else m"
 
       q"""
       val firstMark = __saveState
       ${collector.valBuilder}
 
-      @_root_.scala.annotation.tailrec def rec(mark: org.parboiled2.Parser.Mark): org.parboiled2.Parser.Mark =
+      @_root_.scala.annotation.tailrec def $recName(mark: org.parboiled2.Parser.Mark): org.parboiled2.Parser.Mark =
         if (${op.render(wrapped)}) {
           ${collector.popToBuilder}
           $recurse
         } else mark
 
-      val mark = rec(firstMark)
+      val mark = $recName(firstMark)
       mark != firstMark && {
         __restoreState(mark)
         ${collector.pushBuilderResult}
@@ -367,23 +369,23 @@ trait OpTreeContext[OpTreeCtx <: ParserMacros.ParserContext] {
     def ruleFrame = q"..$inits; org.parboiled2.RuleFrame.Times(min, max)"
     def renderInner(wrapped: Boolean): Tree = {
       val recurse =
-        if (separator eq null) q"rec(count + 1, __saveState)"
+        if (separator eq null) q"$recName(count + 1, __saveState)"
         else q"""
-          val m = __saveState; if (${separator(wrapped)}) rec(count + 1, m)
+          val m = __saveState; if (${separator(wrapped)}) $recName(count + 1, m)
           else (count >= min) && { __restoreState(m); true }"""
 
       q"""
       ${collector.valBuilder}
       ..$inits
 
-      @_root_.scala.annotation.tailrec def rec(count: Int, mark: org.parboiled2.Parser.Mark): Boolean = {
+      @_root_.scala.annotation.tailrec def $recName(count: Int, mark: org.parboiled2.Parser.Mark): Boolean = {
         if (${op.render(wrapped)}) {
           ${collector.popToBuilder}
           if (count < max) $recurse else true
         } else (count > min) && { __restoreState(mark); true }
       }
 
-      (max <= 0) || rec(1, __saveState) && ${collector.pushBuilderResult}"""
+      (max <= 0) || $recName(1, __saveState) && ${collector.pushBuilderResult}"""
     }
   }
 
